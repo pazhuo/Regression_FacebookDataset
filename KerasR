@@ -1,0 +1,574 @@
+# deep learning in r
+require(mlbench)
+## Loading required package: mlbench
+require(mxnet)
+## Loading required package: mxnet
+## Loading required package: methods
+data(Sonar, package="mlbench")
+
+Sonar[,61] = as.numeric(Sonar[,61])-1
+train.ind = c(1:50, 100:150)
+train.x = data.matrix(Sonar[train.ind, 1:60])
+train.y = Sonar[train.ind, 61]
+test.x = data.matrix(Sonar[-train.ind, 1:60])
+test.y = Sonar[-train.ind, 61]
+
+
+setwd("C:/Users/Eli/Desktop/PlantformConparisonAsim") 
+
+# Install keras
+#https://www.youtube.com/watch?v=CcKf-iZ8umk
+#http://www.codingfreaks.info/deep-learning-with-keras-in-r-multilayer-perceptron-neural-network-for-multiclass-classification/
+library(keras)
+install_keras()
+
+iris=read.csv("iris.csv") 
+names(iris) <- c("speal.length","sepal.width","petal.length","petal.width"
+                 ,"species")
+iris=as.matrix(iris)
+head(iris)
+dim(iris)
+
+plot(iris$petal.length,iris$petal.width,pch=21,
+     bg=c("red","green3","blue")[unclass(iris$species)],
+     xlab="petal length", ylab="petal width")
+#Note that you use the unclass() function to convert the names of the species, 
+#that is, "setosa, versicolor", and "virginica", to the numeric 1, 2, and 3.
+library(corrplot)
+m<-cor(iris[,1:4])
+corrplot(m, method="circle")
+
+summary(iris)
+
+# Build your own `normalize()` function
+normalize <- function(x) {
+  num <- x - min(x)
+  denom <- max(x) - min(x)
+  return (num/denom)
+}
+
+# Normalize the `iris` data
+iris_norm <- as.data.frame(lapply(iris[1:4],normalize))
+
+# Return the first part of `iris` 
+head(iris)
+#use histogtam to check the diffrence
+hist(iris)
+hist(iris_norm[1:4])
+
+#you also can use normalize() function in keras package
+#but you need to change it into matrix first
+#change all data into numeric type
+iris<-as.matrix(iris)
+
+# Determine sample size
+ind <- sample(2, nrow(iris), replace=TRUE, prob=c(0.67, 0.33))
+
+# Split the `iris` data
+iris.training <- iris[ind==1, 1:4]
+print(iris.training)
+iris.test <- iris[ind==2, 1:4]
+
+# Split the class attribute
+iris.trainingtarget <- iris[ind==1, 5]
+print(iris.trainingtarget)
+iris.testtarget <- iris[ind==2, 5]
+
+# One hot encode training target values
+iris.trainLabels <- to_categorical(iris.trainingtarget)
+print(iris.trainLabels)
+# One hot encode test target values
+iris.testLabels <- to_categorical(iris.testtarget)
+
+model<-keras_model_sequential()
+
+# Add layers to the model
+model %>% 
+  layer_dense(units = 8, activation = 'relu', input_shape = c(4))
+
+#first layer contains 8 hidden notes, 
+#has an input_shape of 4 because your training data iris.training has 4 columns.
+# Print a summary of a model
+summary(model)
+
+# Get model configuration
+get_config(model)
+
+# Get layer configuration
+get_layer(model, index = 1)
+
+# List the model's layers
+model$layers
+
+# List the input tensors
+model$inputs
+
+# List the output tensors
+model$outputs
+
+# Compile the model
+model %>% compile(
+  loss='mean_squared_error', optimizer='sgd')
+
+# Fit the model 
+model %>% fit(
+  iris.training, 
+  iris.trainLabels, 
+  epochs = 100, 
+  batch_size = 5, 
+  validation_split = 0.2)
+
+# Plot the model loss of the training data
+plot(history$metrics$loss, main="Model Loss", xlab = "epoch", ylab="loss", col="blue", type="l")
+
+# Plot the model loss of the test data
+lines(history$metrics$val_loss, col="green")
+
+# Add legend
+legend("topright", c("train","test"), col=c("blue", "green"), lty=c(1,1))
+
+# Store the fitting history in `history` 
+history <- model %>% fit(
+  iris.training, 
+  iris.trainLabels, 
+  epochs = 200,
+  batch_size = 5, 
+  validation_split = 0.2
+)
+
+# Plot the history
+plot(history)
+
+
+
+
+
+
+library(keras)
+library(readr)
+library(stringr)
+library(purrr)
+library(tibble)
+library(dplyr)
+
+# Function definition -----------------------------------------------------
+
+tokenize_words <- function(x){
+  x <- x %>% 
+    str_replace_all('([[:punct:]]+)', ' \\1') %>% 
+    str_split(' ') %>%
+    unlist()
+  x[x != ""]
+}
+
+parse_stories <- function(lines, only_supporting = FALSE){
+  lines <- lines %>% 
+    str_split(" ", n = 2) %>%
+    map_df(~tibble(nid = as.integer(.x[[1]]), line = .x[[2]]))
+  
+  lines <- lines %>%
+    mutate(
+      split = map(line, ~str_split(.x, "\t")[[1]]),
+      q = map_chr(split, ~.x[1]),
+      a = map_chr(split, ~.x[2]),
+      supporting = map(split, ~.x[3] %>% str_split(" ") %>% unlist() %>% as.integer()),
+      story_id = c(0, cumsum(nid[-nrow(.)] > nid[-1]))
+    ) %>%
+    select(-split)
+  
+  stories <- lines %>%
+    filter(is.na(a)) %>%
+    select(nid_story = nid, story_id, story = q)
+  
+  questions <- lines %>%
+    filter(!is.na(a)) %>%
+    select(-line) %>%
+    left_join(stories, by = "story_id") %>%
+    filter(nid_story < nid)
+  
+  if(only_supporting){
+    questions <- questions %>%
+      filter(map2_lgl(nid_story, supporting, ~.x %in% .y))
+  }
+  
+  questions %>%
+    group_by(story_id, nid, question = q, answer = a) %>%
+    summarise(story = paste(story, collapse = " ")) %>%
+    ungroup() %>% 
+    mutate(
+      question = map(question, ~tokenize_words(.x)),
+      story = map(story, ~tokenize_words(.x)),
+      id = row_number()
+    ) %>%
+    select(id, question, answer, story)
+}
+
+vectorize_stories <- function(data, vocab, story_maxlen, query_maxlen){
+  
+  questions <- map(data$question, function(x){
+    map_int(x, ~which(.x == vocab))
+  })
+  
+  stories <- map(data$story, function(x){
+    map_int(x, ~which(.x == vocab))
+  })
+  
+  # "" represents padding
+  answers <- sapply(c("", vocab), function(x){
+    as.integer(x == data$answer)
+  })
+  
+  list(
+    questions = pad_sequences(questions, maxlen = query_maxlen),
+    stories   = pad_sequences(stories, maxlen = story_maxlen),
+    answers   = answers
+  )
+}
+
+
+# Parameters --------------------------------------------------------------
+
+challenges <- list(
+  # QA1 with 10,000 samples
+  single_supporting_fact_10k = "%stasks_1-20_v1-2/en-10k/qa1_single-supporting-fact_%s.txt",
+  # QA2 with 10,000 samples
+  two_supporting_facts_10k = "%stasks_1-20_v1-2/en-10k/qa2_two-supporting-facts_%s.txt"
+)
+
+challenge_type <- "single_supporting_fact_10k"
+challenge <- challenges[[challenge_type]]
+max_length <- 999999
+
+
+# Data Preparation --------------------------------------------------------
+
+# Download data
+path <- get_file(
+  fname = "babi-tasks-v1-2.tar.gz",
+  origin = "https://s3.amazonaws.com/text-datasets/babi_tasks_1-20_v1-2.tar.gz"
+)
+untar(path, exdir = str_replace(path, fixed(".tar.gz"), "/"))
+path <- str_replace(path, fixed(".tar.gz"), "/")
+
+# Reading training and test data
+train <- read_lines(sprintf(challenge, path, "train")) %>%
+  parse_stories() %>%
+  filter(map_int(story, ~length(.x)) <= max_length)
+
+test <- read_lines(sprintf(challenge, path, "test")) %>%
+  parse_stories() %>%
+  filter(map_int(story, ~length(.x)) <= max_length)
+
+# Extract the vocabulary
+all_data <- bind_rows(train, test)
+vocab <- c(unlist(all_data$question), all_data$answer, 
+           unlist(all_data$story)) %>%
+  unique() %>%
+  sort()
+
+# Reserve 0 for masking via pad_sequences
+vocab_size <- length(vocab) + 1
+story_maxlen <- map_int(all_data$story, ~length(.x)) %>% max()
+query_maxlen <- map_int(all_data$question, ~length(.x)) %>% max()
+
+# Vectorized versions of training and test sets
+train_vec <- vectorize_stories(train, vocab, story_maxlen, query_maxlen)
+test_vec <- vectorize_stories(test, vocab, story_maxlen, query_maxlen)
+
+
+# Defining the model ------------------------------------------------------
+
+# Placeholders
+sequence <- layer_input(shape = c(story_maxlen))
+question <- layer_input(shape = c(query_maxlen))
+
+# Encoders
+# Embed the input sequence into a sequence of vectors
+sequence_encoder_m <- keras_model_sequential()
+sequence_encoder_m %>%
+  layer_embedding(input_dim = vocab_size, output_dim = 64) %>%
+  layer_dropout(rate = 0.3)
+# output: (samples, story_maxlen, embedding_dim)
+
+# Embed the input into a sequence of vectors of size query_maxlen
+sequence_encoder_c <- keras_model_sequential()
+sequence_encoder_c %>%
+  layer_embedding(input_dim = vocab_size, output = query_maxlen) %>%
+  layer_dropout(rate = 0.3)
+# output: (samples, story_maxlen, query_maxlen)
+
+# Embed the question into a sequence of vectors
+question_encoder <- keras_model_sequential()
+question_encoder %>%
+  layer_embedding(input_dim = vocab_size, output_dim = 64, 
+                  input_length = query_maxlen) %>%
+  layer_dropout(rate = 0.3)
+# output: (samples, query_maxlen, embedding_dim)
+
+# Encode input sequence and questions (which are indices)
+# to sequences of dense vectors
+sequence_encoded_m <- sequence_encoder_m(sequence)
+sequence_encoded_c <- sequence_encoder_c(sequence)
+
+question_encoded <- question_encoder(question)
+
+# Compute a 'match' between the first input vector sequence
+# and the question vector sequence
+# shape: `(samples, story_maxlen, query_maxlen)`
+match <- list(sequence_encoded_m, question_encoded) %>%
+  layer_dot(axes = c(2,2)) %>%
+  layer_activation("softmax")
+
+# Add the match matrix with the second input vector sequence
+response <- list(match, sequence_encoded_c) %>%
+  layer_add() %>%
+  layer_permute(c(2,1))
+
+# Concatenate the match matrix with the question vector sequence
+answer <- list(response, question_encoded) %>%
+  layer_concatenate() %>%
+  # The original paper uses a matrix multiplication for this reduction step.
+  # We choose to use an RNN instead.
+  layer_lstm(32) %>%
+  # One regularization layer -- more would probably be needed.
+  layer_dropout(rate = 0.3) %>%
+  layer_dense(vocab_size) %>%
+  # We output a probability distribution over the vocabulary
+  layer_activation("softmax")
+
+# Build the final model
+model <- keras_model(inputs = list(sequence, question), answer)
+model %>% compile(
+  optimizer = "rmsprop",
+  loss = "",
+  metrics = "accuracy"
+)
+
+
+# Training ----------------------------------------------------------------
+
+model %>% fit(
+  x = list(train_vec$stories, train_vec$questions),
+  y = train_vec$answers,
+  batch_size = 32,
+  epochs = 120,
+  validation_data = list(list(test_vec$stories, test_vec$questions), test_vec$answers)
+)
+
+
+
+
+----------------------------------
+  library(keras)
+
+# Data Preparation ---------------------------------------------------
+
+batch_size <- 128
+num_classes <- 6334
+epochs <- 10
+
+train <- read.csv("Train/yearMSD_new_Train_seed1.csv", head=T)
+test  <- read.csv("Test/yearMSD_new_Test_seed1.csv", head=T)
+
+
+x_train <- train[,1:19]
+str(x_train)
+y_train <- as.factor(train[,20])
+
+x_test <- test[,1:19]
+y_test <- as.factor(test[,20])
+
+head(y_train)
+
+# Convert class vectors to binary class matrices
+y_train <- to_categorical(y_train, num_classes)
+y_test <- to_categorical(y_test, num_classes)
+
+x<-dataset_mnist()
+# Define Model --------------------------------------------------------------
+
+model <- keras_model_sequential()
+model %>% 
+  layer_dense(units = 256, activation = 'relu', input_shape = c(19)) %>% 
+  layer_dropout(rate = 0.4) %>% 
+  layer_dense(units = 128, activation = 'relu') %>%
+  layer_dropout(rate = 0.3) %>%
+  layer_dense(units = 6334, activation = 'softmax')
+
+summary(model)
+
+model %>% compile(
+  loss = 'mean_squared_error',
+  optimizer = optimizer_rmsprop(),
+  metrics = c('accuracy')
+)
+
+# Training & Evaluation ----------------------------------------------------
+
+# Fit model to data
+history <- model %>% fit(
+  x_train, y_train,
+  batch_size = batch_size,
+  epochs = epochs,
+  verbose = 1,
+  validation_split = 0.2
+)
+
+plot(history)
+
+score <- model %>% evaluate(
+  x_test, y_test,
+  verbose = 0
+)
+
+# Output metrics
+cat('Test loss:', score[[1]], '\n')
+cat('Test accuracy:', score[[2]], '\n')
+
+
+#------------------------
+library(keras)
+
+# Data Preparation ---------------------------------------------------
+
+batch_size <- 128
+num_classes <- 10
+epochs <- 10
+
+# The data, shuffled and split between train and test sets
+c(c(x_train, y_train), c(x_test, y_test)) %<-% dataset_mnist()
+
+x_train <- array_reshape(x_train, c(nrow(x_train), 784))
+str(x_train)
+x_test <- array_reshape(x_test, c(nrow(x_test), 784))
+
+# Transform RGB values into [0,1] range
+x_train <- x_train / 255
+x_test <- x_test / 255
+
+cat(nrow(x_train), 'train samples\n')
+cat(nrow(x_test), 'test samples\n')
+
+# Convert class vectors to binary class matrices
+y_train <- to_categorical(y_train, num_classes)
+y_test <- to_categorical(y_test, num_classes)
+
+# Define Model --------------------------------------------------------------
+
+model <- keras_model_sequential()
+model %>% 
+  layer_dense(units = 256, activation = 'relu', input_shape = c(784)) %>% 
+  layer_dropout(rate = 0.4) %>% 
+  layer_dense(units = 128, activation = 'relu') %>%
+  layer_dropout(rate = 0.3) %>%
+  layer_dense(units = 10, activation = 'softmax')
+
+summary(model)
+
+model %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = optimizer_rmsprop(),
+  metrics = c('accuracy')
+)
+
+# Training & Evaluation ----------------------------------------------------
+
+# Fit model to data
+history <- model %>% fit(
+  x_train, y_train,
+  batch_size = batch_size,
+  epochs = epochs,
+  verbose = 1,
+  validation_split = 0.2
+)
+
+plot(history)
+
+score <- model %>% evaluate(
+  x_test, y_test,
+  verbose = 0
+)
+
+# Output metrics
+cat('Test loss:', score[[1]], '\n')
+cat('Test accuracy:', score[[2]], '\n')
+  
+str(x$train)
+
+#------------------------
+library(keras)
+
+# Data Preparation -----------------------------------------------------
+
+batch_size <- 128
+num_classes <- 239
+epochs <- 2
+
+# Input image dimensions
+img_rows <- 19
+
+
+# The data, shuffled and split between train and test sets
+
+train<- read.csv("Train/yearMSD_new_Train_seed1.csv", head=T)
+dim(train)
+x_train <- as.matrix(train[,1:18])
+dim(x_train)
+y_train <- (train[,19]) #239 levels
+head(y_train)
+test<-read.csv("Test/yearMSD_new_Test_seed1.csv", head=T)
+x_test <- as.matrix(test[,1:18])
+y_test <- (test[,19])
+
+
+
+input_shape <- c(img_rows, 1)
+input_shape
+
+
+
+cat('x_train_shape:', dim(x_train), '\n')
+cat(nrow(x_train), 'train samples\n')
+cat(nrow(x_test), 'test samples\n')
+
+
+
+# Define Model -----------------------------------------------------------
+
+# Define model
+model <- keras_model_sequential() %>%
+  layer_conv_2d(filters = 32, kernel_size = c(3,3), activation = 'relu',
+                input_shape = input_shape) %>% 
+  layer_conv_2d(filters = 64, kernel_size = c(3,3), activation = 'relu') %>% 
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
+  layer_dropout(rate = 0.25) %>% 
+  layer_flatten() %>% 
+  layer_dense(units = 128, activation = 'relu') %>% 
+  layer_dropout(rate = 0.5) %>% 
+  layer_dense(units = num_classes, activation = 'softmax')
+
+# Compile model
+model %>% compile(
+  loss = loss_categorical_crossentropy,
+  optimizer = optimizer_adadelta(),
+  metrics = c('accuracy')
+)
+
+# Train model
+model %>% fit(
+  x_train, y_train,
+  batch_size = batch_size,
+  epochs = epochs,
+  validation_split = 0.2
+)
+
+
+
+
+scores <- model %>% evaluate(
+  x_test, y_test, verbose = 0
+)
+
+# Output metrics
+cat('Test loss:', scores[[1]], '\n')
+cat('Test accuracy:', scores[[2]], '\n')
