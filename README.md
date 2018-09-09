@@ -1,5 +1,5 @@
 # Regression_FacebookDataset
--Support professor's(Asim Roy) comparative research of ML platforms
+- Support professor's(Asim Roy) comparative research of ML platforms
 
 
--Created and interpreted DeepLeaning models on Facebook datasets
+- Created and interpreted DeepLeaning models on Facebook datasets
