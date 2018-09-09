@@ -1,0 +1,92 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Mon May 21 16:42:28 2018
+
+@author: Zoey
+"""
+
+
+import os
+import pandas as pd
+from sklearn.preprocessing import OneHotEncoder
+import copy
+
+
+path = 'D:/Project/Platform_Comparison/Platform_Comparison/Facebook_data/Train/'
+path1 = 'D:/Project/Platform_Comparison/Platform_Comparison/Facebook_data/Test/'
+
+a=[]
+xa=[]
+ya=[]
+b=[]
+yb =[]
+xb = []
+
+for i,filename in enumerate(os.listdir(path)):
+    a.append(pd.read_csv(path+filename))
+for i,filename in enumerate(os.listdir(path1)):
+    b.append(pd.read_csv(path1+filename))
+
+
+for i in range(10):
+    train_objs_num = len(a[i])
+    dataset = pd.concat(objs=[a[i], b[i]], axis=0)
+    dataset = pd.get_dummies(dataset)
+    xa.append(copy.deepcopy(dataset[:train_objs_num]))
+    xb.append(copy.deepcopy(dataset[train_objs_num:]))
+    yb.append(xb[i]['Total.Interactions'])
+    xb[i] = (xb[i].drop('Total.Interactions',axis=1))    
+    ya.append(xa[i]['Total.Interactions'])
+    xa[i] = (xa[i].drop('Total.Interactions',axis=1))
+    xa[i] = xa[i].fillna(xa[i].mean())
+    xb[i] = xb[i].fillna(xb[i].mean())
+    
+dt_rmse=[]
+dt_mad=[]
+pred=[]
+dt_rmse_grid=[]
+dt_mad_grid=[]
+pred1=[]
+
+from sklearn import tree
+from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_absolute_error
+from sklearn.model_selection import GridSearchCV
+
+f = open('D:/Project/Platform_Comparison/Platform_Comparison/Facebook_data/Dession_tree.txt','w')
+
+for i in range(10):
+    clf = tree.DecisionTreeRegressor()
+    clf = clf.fit(xa[i], ya[i])
+    print(xa[i].shape)
+    print(xb[i].shape)
+    pred.append(clf.predict(xb[i]))
+    print(mean_squared_error(yb[i],pred[i]))
+    print(mean_absolute_error(yb[i],pred[i]))
+    dt_rmse.append(mean_squared_error(yb[i],pred[i]))
+    dt_mad.append(mean_absolute_error(yb[i],pred[i]))
+
+    
+    tree_para = {'max_depth':[1,5,10,15,20,30,40,50,70,90,120,150]}
+
+    grid_search = GridSearchCV(tree.DecisionTreeRegressor(), tree_para, cv=10)
+    grid_search.fit(xa[i],ya[i])
+    print("Best Score: {}".format(grid_search.best_score_))
+    print ("Best params: {}".format(grid_search.best_params_))
+    pred1.append(grid_search.predict(xb[i]))
+    print(mean_squared_error(yb[i],pred1[i]))
+    print(mean_absolute_error(yb[i],pred1[i]))
+    print(i)
+    
+    dt_rmse_grid.append(mean_squared_error(yb[i],pred1[i]))
+    dt_mad_grid.append(mean_absolute_error(yb[i],pred1[i]))
+
+    f.write("Data set number: {}".format(i+1)+'\n'+
+            "RMSE without hyperparam: {}".format(dt_rmse[i])+'\n'+
+           "MAD without hyperparam: {}".format(dt_mad[i])+'\n'+
+           "RMSE with grid search hyperparam: {}".format(dt_rmse_grid[i])+'\n'+
+           "MAD with grid search hyperparam: {}".format(dt_mad_grid[i])+'\n'+
+           "Best Score grid search hyperparam: {}".format(grid_search.best_score_)+'\n'+
+           "Best params grid search hyperparam:: {}".format(grid_search.best_params_)+'\n'+
+            "================")
+f.close() 
